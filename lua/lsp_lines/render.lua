@@ -29,6 +29,9 @@ local BLANK = "blank"
 ---
 ---@return integer
 local function distance_between_cols(bufnr, lnum, start_col, end_col)
+  if end_col == "$" then
+    return vim.api.nvim_win_get_width(0) - distance_between_cols(bufnr, lnum, 0, start_col)
+  end
   local lines = vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)
   if vim.tbl_isempty(lines) then
     -- This can only happen is the line is somehow gone or out-of-bounds.
@@ -37,6 +40,30 @@ local function distance_between_cols(bufnr, lnum, start_col, end_col)
 
   local sub = string.sub(lines[1], start_col, end_col)
   return vim.fn.strdisplaywidth(sub, 0) -- these are indexed starting at 0
+end
+
+local function wrap_diagnostic(msg, diagnostic)
+  local diagnostic_lines = {}
+  local current_line = {}
+
+  for word in msg:gmatch("%S+") do
+    local post_width = vim.fn.strdisplaywidth(table.concat(current_line, " ") .. word)
+    local prefix_len = #msg - #diagnostic.message
+
+    local available_width = distance_between_cols(0, diagnostic.lnum, diagnostic.col, "$") - prefix_len
+    if post_width > available_width then
+      table.insert(diagnostic_lines, table.concat(current_line, " "))
+      current_line = {}
+    end
+
+    table.insert(current_line, word)
+  end
+
+  if #current_line > 0 then
+    table.insert(diagnostic_lines, table.concat(current_line, " "))
+  end
+
+  return diagnostic_lines
 end
 
 ---@param namespace number
@@ -169,6 +196,11 @@ function M.show(namespace, bufnr, diagnostics, opts, source)
         -- b. Has enough space on the left.
         -- c. Is just one line.
         -- d. Is not an overlap.
+
+        local wrap_diag_messages = true
+        if wrap_diag_messages then
+          diagnostic.message = table.concat(wrap_diagnostic(diagnostic.message, diagnostic), "\n")
+        end
 
         for msg_line in diagnostic.message:gmatch("([^\n]+)") do
           local vline = {}
